@@ -19,6 +19,24 @@ on:
   # 可以在仓库的 Actions 标签页中点击 "Run workflow" 按钮手动执行
   workflow_dispatch:  # 允许手动运行
 
+  # 用户 push 到 master 时执行
+  push:
+    branches:
+      - master
+
+    # 忽略脚本自己生成的文件
+    # 防止 Actions 自己 push 后再次触发
+    paths-ignore:
+      #- 'data/sub.txt'
+      # - 'data/**'
+      - 'README.md'
+
+
+# 允许 GitHub Actions 修改仓库内容
+permissions:
+  contents: write
+
+
 # 工作流任务定义
 jobs:
   # 任务名称：自动登录 Netlib
@@ -37,13 +55,18 @@ jobs:
         uses: actions/checkout@v4
 
       # 步骤2：设置 Node.js 环境
-      # login.js 仅使用 Node 内置 fetch，无需 npm 依赖
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '24'
+          cache: 'npm'
 
-      # 步骤3：运行登录脚本
+      # 步骤3：安装依赖（@upstash/redis 等）
+      - name: Install dependencies
+        run: npm ci
+        # run: npm install
+
+      # 步骤4：运行登录脚本
       # 执行实际的自动登录逻辑
       - name: Run login script
         # 设置环境变量，从 GitHub Secrets 中读取敏感信息
@@ -64,6 +87,35 @@ jobs:
           ACCOUNTS: ${{ secrets.ACCOUNTS }}
           # 账号 URL：格式为 "URL1,URL2"
           URLS: ${{ secrets.URLS }}
+
+          # Upstash Redis REST API 凭证
+          # 需要在 GitHub 仓库设置中配置 secrets.UPSTASH_LIST 和 secrets.UPSTASH_URL
+          UPSTASH_LIST: ${{ secrets.UPSTASH_LIST }}
+          UPSTASH_URL: ${{ secrets.UPSTASH_URL }}
         
         # 执行 login.js：通过 fetch 访问账号 URL 保活，并通过 Telegram 发送通知
         run: npm start
+
+
+      # 新增：更新 README 时间戳并清理旧日志
+      - name: Update README Timestamp
+        run: |
+          # 设置时区为东八区（北京时间）
+          export TZ='Asia/Shanghai'
+          CURRENT_TIME=$(date "+%Y-%m-%d %H:%M:%S")
+
+          sed -i '/更新于/d' README.md
+          echo -e "更新于 $CURRENT_TIME" >> README.md
+
+
+      # ==========================================
+      # 4. 提交并 Push（每次都会更新 README 时间戳）
+      # ==========================================
+      - name: Commit & Push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          git add .
+          git commit -m "chore: ..."
+          git push
